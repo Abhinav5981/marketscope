@@ -1,0 +1,125 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// --- Reference data (seeded, fixed lists per the brief — not free text) ---
+
+model Country {
+  id     Int     @id @default(autoincrement())
+  name   String  @unique
+  code   String  @unique
+  states State[]
+}
+
+model State {
+  id        Int     @id @default(autoincrement())
+  name      String
+  countryId Int
+  country   Country @relation(fields: [countryId], references: [id])
+  cities    City[]
+
+  @@unique([countryId, name])
+}
+
+model City {
+  id      Int      @id @default(autoincrement())
+  name    String
+  stateId Int
+  state   State    @relation(fields: [stateId], references: [id])
+  markets Market[]
+
+  @@unique([stateId, name])
+}
+
+// osmTags is an array of {key, value} pairs so a single category can map to
+// more than one OSM tag (e.g. Hypermarket has no clean OSM discriminator —
+// see README "Known limitations").
+model Category {
+  id               Int               @id @default(autoincrement())
+  name             String            @unique
+  osmTags          Json
+  marketLinks      MarketCategory[]
+  discoveredStores DiscoveredStore[]
+}
+
+enum MarketStatus {
+  PENDING
+  DISCOVERING
+  READY
+  FAILED
+}
+
+// Boundary is stored as a plain lat/lng bounding box (4 floats), not a
+// PostGIS geometry — see README "Architecture decisions" for why.
+model Market {
+  id           String       @id @default(cuid())
+  name         String
+  cityId       Int
+  city         City         @relation(fields: [cityId], references: [id])
+  minLat       Float
+  minLng       Float
+  maxLat       Float
+  maxLng       Float
+  areaSqKm     Float
+  status       MarketStatus @default(PENDING)
+  errorMessage String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  categories       MarketCategory[]
+  discoveredStores DiscoveredStore[]
+}
+
+model MarketCategory {
+  marketId   String
+  categoryId Int
+  market     Market   @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  category   Category @relation(fields: [categoryId], references: [id])
+
+  @@id([marketId, categoryId])
+}
+
+// The user's own stores, as uploaded. Not scoped to a market — a portfolio
+// row's inside/outside/ungeocoded classification relative to any given
+// market is computed on read (see marketService), not stored here.
+model PortfolioStore {
+  id            String   @id @default(cuid())
+  storeName     String
+  address       String
+  city          String
+  state         String
+  country       String
+  category      String? // free text as uploaded; not FK'd to Category (the
+  // seeded Category list drives *discovery*, portfolio categories are the
+  // customer's own taxonomy and don't need to match it)
+  latitude      Float?
+  longitude     Float?
+  geocoded      Boolean  @default(false) // true once lat/lng came from Nominatim rather than the upload
+  geocodeSource String? // "upload" | "nominatim" | null (still ungeocodable)
+  createdAt     DateTime @default(now())
+}
+
+// A store found via the places API (Overpass/OSM) inside a market's
+// boundary, filtered to that market's selected categories.
+model DiscoveredStore {
+  id         String   @id @default(cuid())
+  marketId   String
+  market     Market   @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  source     String   @default("overpass")
+  externalId String // OSM element id/type, e.g. "node/123456"
+  name       String
+  categoryId Int
+  category   Category @relation(fields: [categoryId], references: [id])
+  osmTag     String // e.g. "shop=supermarket", kept for display/debugging
+  latitude   Float
+  longitude  Float
+  address    String?
+  createdAt  DateTime @default(now())
+
+  @@unique([marketId, externalId]) // idempotent if discovery is re-run
+}

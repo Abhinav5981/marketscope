@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: marketscope-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: marketscope
+      POSTGRES_PASSWORD: marketscope
+      POSTGRES_DB: marketscope
+    ports:
+      - "5433:5432"
+    volumes:
+      - marketscope-postgres-data:/var/lib/postgresql/data
+
+volumes:
+  marketscope-postgres-data:
